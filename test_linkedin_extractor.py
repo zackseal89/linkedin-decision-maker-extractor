@@ -5,6 +5,8 @@ import os
 from linkedin_decision_maker_extractor import LinkedInDecisionMakerExtractor, logger
 import requests # Added for requests.exceptions
 import logging # Added for logger manipulation in tests
+import sys # For mocking sys.exit and checking CLI behavior
+import argparse # For creating mock args Namespace
 
 class TestLinkedInDecisionMakerExtractor(unittest.TestCase):
     
@@ -169,7 +171,15 @@ class TestLinkedInDecisionMakerExtractor(unittest.TestCase):
         result = self.extractor._make_request("test_success_endpoint")
         self.assertEqual(result, {"data": "success"})
         mock_get.assert_called_once()
-    
+
+    def test_initialization(self):
+        """Test that the extractor initializes correctly."""
+        self.assertEqual(self.extractor.api_key, self.api_key)
+        self.assertEqual(self.extractor.base_url, "https://api.linkedin.com/v2")
+        self.assertEqual(self.extractor.retry_attempts, 3)
+        # Test default retry_delay, though not strictly required by prompt, it's good practice
+        self.assertEqual(self.extractor.retry_delay, 2)
+
     def test_save_to_csv(self):
         """Test saving data to CSV."""
         # Test data
@@ -218,67 +228,192 @@ class TestLinkedInDecisionMakerExtractor(unittest.TestCase):
                 os.remove(test_file)
 
 
-    @patch('linkedin_decision_maker_extractor.LinkedInDecisionMakerExtractor')
-    @patch('linkedin_decision_maker_extractor.argparse.ArgumentParser.parse_args')
-    @patch('linkedin_decision_maker_extractor.os.getenv')
-    @patch('linkedin_decision_maker_extractor.datetime')
-    def test_main_success(self, mock_datetime, mock_getenv, mock_parse_args, MockExtractor):
-        """Test main function successful execution."""
-        # Mock args
-        mock_args = MagicMock()
-        mock_args.company_url = "http://linkedin.com/company/test"
-        mock_args.output_prefix = "test_output"
-        mock_parse_args.return_value = mock_args
-        
-        # Mock API key
-        mock_getenv.return_value = "fake_api_key"
+# Now, we define the TestCLI class with all its methods
+class TestCLI(unittest.TestCase):
+    @patch('cli.argparse.ArgumentParser')
+    @patch('cli.LinkedInDecisionMakerExtractor')
+    @patch('cli.os.getenv')
+    @patch('cli.datetime')
+    @patch('builtins.print')
+    @patch('cli.sys.exit') # Patch sys.exit in the context of cli.py
+    def setUp(self, mock_sys_exit, mock_print, mock_datetime, mock_getenv, MockExtractor, MockArgumentParser):
+        self.mock_sys_exit = mock_sys_exit
+        self.mock_print = mock_print
+        self.mock_datetime = mock_datetime
+        self.mock_getenv = mock_getenv
+        self.MockExtractor = MockExtractor
+        self.mock_arg_parser = MockArgumentParser.return_value
+        self.mock_extractor_instance = self.MockExtractor.return_value
+
+        # Default behavior for mocks
+        self.mock_getenv.return_value = "env_api_key" # Default API key from environment
+        self.mock_extractor_instance.extract_decision_makers.return_value = [{"name": "Test User"}]
         
         # Mock datetime
         mock_now = MagicMock()
         mock_now.strftime.return_value = "20230101_120000"
-        mock_datetime.now.return_value = mock_now
+        self.mock_datetime.now.return_value = mock_now
         
-        # Mock extractor instance and its methods
-        mock_extractor_instance = MockExtractor.return_value
-        mock_extractor_instance.extract_decision_makers.return_value = [{"name": "Test User"}]
-        
-        # Capture print calls
-        with patch('builtins.print') as mock_print:
-            # Suppress logger output to console for this test to avoid clutter
-            # and focus on what main() itself prints or logs to file.
-            # We are primarily testing the flow and file operations here.
-            original_handlers = logger.handlers
-            logger.handlers = [h for h in original_handlers if not isinstance(h, logging.StreamHandler)]
-            try:
-                from linkedin_decision_maker_extractor import main as extractor_main
-                extractor_main()
-            finally:
-                logger.handlers = original_handlers # Restore original handlers
+        # Default parsed args
+        self.default_args = argparse.Namespace(
+            company="http://linkedin.com/company/test",
+            output="decision_makers",
+            format="both",
+            api_key=None # Default, rely on env var
+        )
+        self.mock_arg_parser.parse_args.return_value = self.default_args
 
-        mock_getenv.assert_called_once_with("LINKEDIN_API_KEY")
-        MockExtractor.assert_called_once_with("fake_api_key")
-        mock_extractor_instance.extract_decision_makers.assert_called_once_with("http://linkedin.com/company/test")
-        mock_extractor_instance.save_to_csv.assert_called_once_with([{"name": "Test User"}], "test_output_20230101_120000.csv")
-        mock_extractor_instance.save_to_json.assert_called_once_with([{"name": "Test User"}], "test_output_20230101_120000.json")
+        # Import cli.main here, after mocks are set up, to ensure it uses mocked components
+        # We need to reload it if it was imported before, or ensure it's imported for the first time here.
+        # For simplicity, we assume it's being imported effectively for tests here.
+        # If cli.py was already imported, we might need importlib.reload
+        global main_cli
+        import cli as main_cli_module
+        main_cli = main_cli_module.main
 
-    @patch('linkedin_decision_maker_extractor.argparse.ArgumentParser.parse_args')
-    @patch('linkedin_decision_maker_extractor.os.getenv')
-    @patch('builtins.print') # To capture print output
-    def test_main_no_api_key(self, mock_print, mock_getenv, mock_parse_args):
-        """Test main function when LINKEDIN_API_KEY is not set."""
-        mock_args = MagicMock()
-        mock_args.company_url = "http://linkedin.com/company/test"
-        mock_parse_args.return_value = mock_args
+
+    def test_cli_success_csv_output(self):
+        """Test CLI successful run with CSV output."""
+        self.default_args.format = "csv"
+        self.mock_arg_parser.parse_args.return_value = self.default_args
         
-        mock_getenv.return_value = None # Simulate missing API key
+        main_cli()
         
-        from linkedin_decision_maker_extractor import main as extractor_main
-        with self.assertLogs(logger, level='ERROR') as cm:
-            extractor_main()
+        self.MockExtractor.assert_called_once_with(api_key="env_api_key")
+        self.mock_extractor_instance.extract_decision_makers.assert_called_once_with("http://linkedin.com/company/test")
+        self.mock_extractor_instance.save_to_csv.assert_called_once_with(
+            [{"name": "Test User"}], "decision_makers_20230101_120000.csv"
+        )
+        self.mock_extractor_instance.save_to_json.assert_not_called()
+        self.mock_print.assert_any_call("Processing complete. Results saved.")
+
+    def test_cli_success_json_output(self):
+        """Test CLI successful run with JSON output."""
+        self.default_args.format = "json"
+        self.mock_arg_parser.parse_args.return_value = self.default_args
+
+        main_cli()
+
+        self.MockExtractor.assert_called_once_with(api_key="env_api_key")
+        self.mock_extractor_instance.extract_decision_makers.assert_called_once_with("http://linkedin.com/company/test")
+        self.mock_extractor_instance.save_to_json.assert_called_once_with(
+            [{"name": "Test User"}], "decision_makers_20230101_120000.json"
+        )
+        self.mock_extractor_instance.save_to_csv.assert_not_called()
+        self.mock_print.assert_any_call("Processing complete. Results saved.")
+
+    def test_cli_success_both_outputs(self):
+        """Test CLI successful run with both CSV and JSON outputs."""
+        # Default args already set to 'both'
+        main_cli()
+
+        self.MockExtractor.assert_called_once_with(api_key="env_api_key")
+        self.mock_extractor_instance.extract_decision_makers.assert_called_once_with("http://linkedin.com/company/test")
+        self.mock_extractor_instance.save_to_csv.assert_called_once_with(
+            [{"name": "Test User"}], "decision_makers_20230101_120000.csv"
+        )
+        self.mock_extractor_instance.save_to_json.assert_called_once_with(
+            [{"name": "Test User"}], "decision_makers_20230101_120000.json"
+        )
+        self.mock_print.assert_any_call("Processing complete. Results saved.")
+
+    def test_cli_api_key_from_command_line(self):
+        """Test API key provided via command line argument."""
+        self.default_args.api_key = "cli_api_key"
+        self.mock_arg_parser.parse_args.return_value = self.default_args
         
-        mock_getenv.assert_called_once_with("LINKEDIN_API_KEY")
-        mock_print.assert_called_with("Error: LINKEDIN_API_KEY environment variable not set. Please set it before running the script.")
-        self.assertTrue(any("LINKEDIN_API_KEY environment variable not set" in msg for msg in cm.output))
+        main_cli()
+        
+        self.MockExtractor.assert_called_once_with(api_key="cli_api_key")
+        self.mock_getenv.assert_not_called() # Should not try to get from env if provided in CLI
+
+    def test_cli_api_key_from_environment(self):
+        """Test API key fetched from environment variable."""
+        # self.default_args.api_key is None by default in setUp
+        self.mock_getenv.return_value = "env_api_key_specific_test" # Use a distinct value for this test
+        
+        main_cli()
+        
+        self.MockExtractor.assert_called_once_with(api_key="env_api_key_specific_test")
+        self.mock_getenv.assert_called_once_with("LINKEDIN_API_KEY")
+
+    def test_cli_no_api_key_provided(self):
+        """Test scenario where no API key is available (CLI or environment)."""
+        self.default_args.api_key = None
+        self.mock_arg_parser.parse_args.return_value = self.default_args
+        self.mock_getenv.return_value = None # No environment API key
+
+        main_cli()
+        
+        self.mock_print.assert_any_call("Error: LinkedIn API key not provided. Set LINKEDIN_API_KEY or use --api-key.")
+        self.mock_sys_exit.assert_called_once_with(1)
+
+    def test_cli_no_decision_makers_found(self):
+        """Test scenario where no decision makers are found."""
+        self.mock_extractor_instance.extract_decision_makers.return_value = [] # Simulate no decision makers
+
+        main_cli()
+        
+        self.mock_print.assert_any_call("No decision makers found or an error occurred during extraction.")
+        self.mock_extractor_instance.save_to_csv.assert_not_called()
+        self.mock_extractor_instance.save_to_json.assert_not_called()
+        # Depending on desired behavior, sys.exit might be called or not.
+        # If it should exit gracefully (e.g. sys.exit(0)), then:
+        # self.mock_sys_exit.assert_called_once_with(0) 
+        # If it just prints and finishes, no sys.exit call is expected beyond what might be at the very end of main.
+        # For this test, let's assume it prints and exits normally (implicitly exit 0 if no error).
+
+    def test_cli_missing_company_argument(self):
+        """Test CLI behavior when --company argument is missing."""
+        # We need to simulate argparse raising an error.
+        # This usually happens if parse_args is called with arguments that cause it to exit.
+        # We can mock parse_args to raise SystemExit like argparse does,
+        # or check if parser.error (which prints message and exits) is called.
+        
+        # Scenario 1: Mocking parse_args to simulate its error behavior (e.g., SystemExit)
+        # This requires careful handling if cli.py catches SystemExit.
+        # For this test, we'll assume that if required args are missing,
+        # ArgumentParser.error is called, which in turn calls sys.exit.
+        # We've already patched sys.exit. Let's patch parser.error.
+        self.mock_arg_parser.error = MagicMock()
+        
+        # To trigger the error, cli.main() would normally call parser.parse_args().
+        # If parse_args itself is the one raising an error for missing arguments BEFORE cli.py's main logic,
+        # we'd need to test that.
+        # However, cli.py structure is:
+        #   parser = create_parser()
+        #   args = parser.parse_args() <-- Error happens here
+        #   main_logic(args)
+        # Our current mock setup for parse_args returns default_args.
+        # To test missing --company, we need to simulate it *before* main_cli() is called with parsed args.
+        # This test is more about the ArgumentParser configuration itself.
+        
+        # Let's adjust the approach:
+        # We will test the parser creation and then simulate calling parse_args with missing company.
+        # This means we need to get the actual parser from cli.py or reconstruct its behavior.
+        
+        # For simplicity in this context, let's assume the `main_cli` function
+        # is called and *then* it tries to access a non-existent company attribute,
+        # or that the `parse_args` mock is configured to simulate this.
+        # A more direct way would be to test `create_parser` from `cli.py` if it exists,
+        # or to invoke `cli.py` as a subprocess.
+        
+        # Given the current patching, we'll simulate parse_args raising an error.
+        # This means the call to main_cli() might not even happen or complete.
+        self.mock_arg_parser.parse_args.side_effect = SystemExit(2) # Typical exit code for argparse errors
+
+        with self.assertRaises(SystemExit):
+             main_cli() # This call will lead to parse_args being called
+
+        # We expect sys.exit to be called by argparse's error handling.
+        # The main_cli function itself might not reach the point of calling sys.exit.
+        # This assertion depends on how ArgumentParser internally calls sys.exit.
+        # Our @patch('cli.sys.exit') should catch this.
+        self.mock_sys_exit.assert_called_with(2)
+        # We could also check if print was called with an error message by argparse,
+        # but that's usually to stderr, and our mock_print is for stdout.
+        # A more robust test would involve capturing stderr.
+
 
 if __name__ == '__main__':
     unittest.main()

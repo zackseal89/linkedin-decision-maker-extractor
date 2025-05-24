@@ -2,15 +2,10 @@ import requests
 import time
 import pandas as pd
 import logging
-import requests
-import time
-import pandas as pd
-import logging
 import json
 from typing import Dict, List, Optional
 from datetime import datetime
 import os
-import argparse
 
 # Configure logging
 logging.basicConfig(
@@ -281,42 +276,3 @@ class LinkedInDecisionMakerExtractor:
         except Exception as e:
             logger.error(f"Error saving to JSON: {e}")
             raise
-
-# Example usage
-def main():
-    parser = argparse.ArgumentParser(description="Extract decision makers from a LinkedIn company URL.")
-    parser.add_argument("company_url", type=str, help="The LinkedIn URL of the company.")
-    parser.add_argument(
-        "--output_prefix", 
-        type=str, 
-        default="decision_makers", 
-        help="Prefix for the output CSV and JSON files. Timestamp will be appended. (default: decision_makers)"
-    )
-    
-    args = parser.parse_args()
-    
-    api_key = os.getenv("LINKEDIN_API_KEY")
-    if not api_key:
-        logger.error("LINKEDIN_API_KEY environment variable not set.")
-        # Also print to console for immediate user feedback if logs are not monitored
-        print("Error: LINKEDIN_API_KEY environment variable not set. Please set it before running the script.")
-        return
-
-    extractor = LinkedInDecisionMakerExtractor(api_key)
-    
-    logger.info(f"Processing company URL: {args.company_url}")
-    decision_makers = extractor.extract_decision_makers(args.company_url)
-    
-    if decision_makers:
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        csv_file = f"{args.output_prefix}_{timestamp}.csv"
-        json_file = f"{args.output_prefix}_{timestamp}.json"
-        
-        extractor.save_to_csv(decision_makers, csv_file)
-        extractor.save_to_json(decision_makers, json_file)
-        logger.info(f"Processing complete. Results saved to {csv_file} and {json_file}")
-    else:
-        logger.info("No decision makers found or an error occurred during extraction.")
-
-if __name__ == "__main__":
-    main()

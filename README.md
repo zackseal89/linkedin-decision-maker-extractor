@@ -51,6 +51,7 @@ A Python-based tool for extracting decision makers from LinkedIn company profile
     LINKEDIN_API_KEY="your_actual_api_key_here"
     ```
     The script will automatically load this `.env` file if `python-dotenv` is installed and the file exists.
+    Alternatively, the API key can be provided directly via the `--api-key` or `-k` command-line option in `cli.py`, which will take precedence over the environment variable.
 
 ## Usage
 
@@ -59,59 +60,87 @@ A Python-based tool for extracting decision makers from LinkedIn company profile
 The primary way to use the tool is via its command-line interface.
 
 ```bash
-python linkedin_decision_maker_extractor.py <company_linkedin_url> [options]
+python cli.py --company <company_linkedin_url> [options]
 ```
 
 **Arguments:**
 
--   `company_linkedin_url`: (Required) The full LinkedIn URL of the target company.
-    Example: `https://www.linkedin.com/company/google/`
+-   `--company <url>` or `-c <url>`: (Required) The full LinkedIn URL of the target company.
+    Example: `--company "https://www.linkedin.com/company/google/"`
 
 **Options:**
 
--   `--output_prefix <prefix>`: (Optional) Prefix for the output CSV and JSON files. A timestamp will be appended. Defaults to `decision_makers`.
-    Example: `--output_prefix my_company_decision_makers` will result in files like `my_company_decision_makers_YYYYMMDD_HHMMSS.csv`.
+-   `--output <prefix>` or `-o <prefix>`: (Optional) Prefix for the output CSV and JSON files. A timestamp will be appended. Defaults to `decision_makers`.
+    Example: `--output my_company_decision_makers` will result in files like `my_company_decision_makers_YYYYMMDD_HHMMSS.csv`.
+-   `--format <format>` or `-f <format>`: (Optional) Output format. Choices: `csv`, `json`, `both`. Default: `both`.
+    Example: `--format csv`
+-   `--api-key <key>` or `-k <key>`: (Optional) LinkedIn API key. If provided, this will override the `LINKEDIN_API_KEY` environment variable.
+    Example: `--api-key your_actual_api_key_here`
 
 **Example CLI Usage:**
 
 ```bash
-# Ensure LINKEDIN_API_KEY is set in your environment or .env file
-python linkedin_decision_maker_extractor.py "https://www.linkedin.com/company/microsoft/" --output_prefix microsoft_contacts
+# Ensure LINKEDIN_API_KEY is set in your environment or .env file,
+# or provide it with the --api-key option.
+python cli.py --company "https://www.linkedin.com/company/microsoft/" --output microsoft_contacts --format both
 ```
 This will fetch decision makers for Microsoft and save the results to `microsoft_contacts_YYYYMMDD_HHMMSS.csv` and `microsoft_contacts_YYYYMMDD_HHMMSS.json`.
 
 ### As a Python Module (Advanced Usage)
 
-You can also import and use the `LinkedInDecisionMakerExtractor` class in your own Python scripts.
+You can import and use the `LinkedInDecisionMakerExtractor` class in your own Python scripts. The `linkedin_decision_maker_extractor.py` file itself is no longer runnable as a standalone script after the removal of its `main` function.
 
 ```python
 import os
 from linkedin_decision_maker_extractor import LinkedInDecisionMakerExtractor
 from datetime import datetime
 
-# Ensure LINKEDIN_API_KEY is set as an environment variable
+# Ensure LINKEDIN_API_KEY is set as an environment variable or pass the key directly.
+# Example using environment variable:
 api_key = os.getenv("LINKEDIN_API_KEY")
+
+# Or, provide the API key directly:
+# api_key = "your_actual_api_key_here"
+
 if not api_key:
-    print("Error: LINKEDIN_API_KEY environment variable not set.")
+    print("Error: LinkedIn API key not provided. Set the LINKEDIN_API_KEY environment variable or pass the key to the extractor.")
     exit()
 
-extractor = LinkedInDecisionMakerExtractor(api_key)
+# Initialize the extractor with the API key
+extractor = LinkedInDecisionMakerExtractor(api_key=api_key)
 
-company_url = "https://www.linkedin.com/company/example-inc/"
+# Define the target company URL
+company_url = "https://www.linkedin.com/company/linkedin/" # Replace with a valid LinkedIn company URL
 
-print(f"Extracting decision makers for {company_url}...")
-decision_makers = extractor.extract_decision_makers(company_url)
+print(f"Attempting to extract decision makers for: {company_url}")
 
-if decision_makers:
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    csv_file = f"module_usage_decision_makers_{timestamp}.csv"
-    json_file = f"module_usage_decision_makers_{timestamp}.json"
-    
-    extractor.save_to_csv(decision_makers, csv_file)
-    extractor.save_to_json(decision_makers, json_file)
-    print(f"Results saved to {csv_file} and {json_file}")
-else:
-    print("No decision makers found or an error occurred.")
+try:
+    # Extract decision makers
+    decision_makers = extractor.extract_decision_makers(company_url)
+
+    if decision_makers:
+        print(f"Found {len(decision_makers)} potential decision makers.")
+        
+        # Create a timestamp for unique filenames
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        
+        # Define output filenames
+        csv_output_file = f"decision_makers_{timestamp}.csv"
+        json_output_file = f"decision_makers_{timestamp}.json"
+        
+        # Save to CSV
+        extractor.save_to_csv(decision_makers, csv_output_file)
+        print(f"Decision makers data saved to {csv_output_file}")
+        
+        # Save to JSON
+        extractor.save_to_json(decision_makers, json_output_file)
+        print(f"Decision makers data saved to {json_output_file}")
+        
+    else:
+        print("No decision makers found or an error occurred during extraction.")
+
+except Exception as e:
+    print(f"An error occurred during the process: {e}")
 
 ```
 
